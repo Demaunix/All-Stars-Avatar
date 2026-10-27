@@ -1,0 +1,21 @@
+# Never commit game files, console data or build outputs.
+__pycache__/
+*.pyc
+work/
+backups/
+build/
+src/avatar/input/
+src/avatar/build/
+src/avatar/renders/
+src/avatar/research/
+*.bin
+*.zif
+*.zig
+*.xpac
+*.toc
+*.dds
+*.png
+*.dll
+*.exe
+*.zip
+*.pkl
