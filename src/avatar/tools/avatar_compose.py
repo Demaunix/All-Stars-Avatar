@@ -342,12 +342,12 @@ def _seams(me, names):
 
 
 def align_to_body(garment_mesh, body_mesh, min_seams=3, max_spread=0.03):
-    """Rigid translation that puts a garment into its body's frame.
+    """Measure (and, in the returned copy, remove) the rigid offset of a garment against its body over their shared seams.
 
-    Observed (research/GARMENT-OFFSETS.json): skinned garments are authored in category-dependent frames (e.g. tops
-    ~-0.15, gloves ~-0.20 in y relative to MaleBody/FemaleBody), with small spread across their seams; trousers and
-    shoes are within ~0.01. The console-side correction is not in the supplied data, so the median offset over seams
-    shared with the body is removed. Returns (aligned mesh copy, record)."""
+    rp6: with the per-axis decode every garment type sits in the body's frame (research/GARMENT-OFFSETS.json: per-type median
+    |dy| <= 0.008, worst item 0.022 in y; dz up to 0.045 on two heels), so compose only records the measurement. The factor-2 decode showed category "frames"
+    (tops -0.15, gloves -0.20: research/GARMENT-OFFSETS-c253-decode.json), which the c253 reproduction path still corrects.
+    Returns (copy with the median offset removed, record)."""
     import bone_map
     names = bone_map.xbox_bone_names()
     g, b = _seams(garment_mesh, names), _seams(body_mesh, names)
@@ -360,18 +360,21 @@ def align_to_body(garment_mesh, body_mesh, min_seams=3, max_spread=0.03):
     if spread.max() > max_spread:
         return garment_mesh, dict(applied=False, seams=len(common), delta=med.round(4).tolist(), spread=spread.round(4).tolist(), reason="offset not rigid")
     m2 = dict(garment_mesh)
-    # positions = min + q*step*2 (avatar_model.positions); shifting min moves every vertex by -delta
+    # positions = min + q*step*K (avatar_model.positions); shifting min moves every vertex by -delta whatever K is
     m2["min"] = tuple(np.asarray(garment_mesh["min"]) - med)
     return m2, dict(applied=True, seams=len(common), delta=med.round(4).tolist(), spread=spread.round(4).tolist())
 
 
-TOP_OFFSET_FALLBACK = {0: (0.0, -0.1549, 0.0), 1: (0.0, -0.1499, 0.0)}  # GARMENT-OFFSETS.json medians, 0x8 male/female
-# step 4 (2026-10-21): more worn roles. Head items (hat, glasses, earrings) are authored on the HEAD bone in the head frame
-# (= the garment frame the body's upper half is moved to) and need no shift. Hand and wrist items are authored ~0.197 below
-# the body seams (GARMENT-OFFSETS.json: gloves -0.197, wrist bands -0.202..-0.215; rings have no seams: gloves value assumed),
-# i.e. ~0.045 below the tops' frame, so they are shifted by (top delta - own offset) into the moved body's frame.
 EXTRA_ROLES = ("costume", "hat", "glasses", "gloves", "wrist", "ring", "earrings")
-HAND_OFFSET_FALLBACK = {"gloves": (0.0, -0.197, -0.002), "wrist": (0.0, -0.208, -0.009), "ring": (0.0, -0.197, -0.002)}
+# rp6 (2026-10-27): with the per-axis decode (avatar_model.DECODES["rp6"]) every worn part is authored in the body's own frame
+# (research/GARMENT-OFFSETS.json: per-type median |dy| <= 0.008, worst single item 0.022; head items have no body seams and sit
+# with the head). Nothing is shifted any more. Every part's measured offset goes into the provenance, and a median seam offset
+# beyond FRAME_TOLERANCE (rigid or not) refuses the bake: it would mean a part in another frame, as the factor-2 decode's 15 cm
+# "garment frame" was (checked: with K forced to 2 the rp6 path refuses Male Formal Suit at dy -0.14).
+FRAME_TOLERANCE = 0.05
+# c253 reproduction only (avatar_model.set_decode("c253")): the C253 presets' keys and Codex's body shift for the factor-2 decode.
+C253_KEYS = {"body", "head", "hair", "shirt", "pants", "shoes", "eyebrows", "eyes", "mouth", "frame"}
+TOP_OFFSET_FALLBACK = {0: (0.0, -0.1549, 0.0), 1: (0.0, -0.1499, 0.0)}  # GARMENT-OFFSETS-c253-decode.json medians, 0x8 male/female
 
 
 def hat_variant(hair_index):
@@ -388,7 +391,7 @@ def hat_variant(hair_index):
 
 
 def upper_bones():
-    """Xbox bone indices of BACKA and its descendants (PC/Xbox hierarchy is identical by name)."""
+    """Xbox bone indices of BACKA and its descendants (PC/Xbox hierarchy is identical by name). c253 reproduction only."""
     import bone_map
     import pcanim
     xb = bone_map.xbox_bone_names()
@@ -408,13 +411,11 @@ def upper_bones():
 
 
 def body_to_garment_frame(body_mesh, delta):
-    """Move the body's upper half (BACKA and descendants) by `delta`, blended by the skin weights.
+    """c253 reproduction only: move the body's upper half (BACKA and descendants) by `delta`, blended by the skin weights.
 
-    Evidence (research/GARMENT-OFFSETS.json, research/FRAME-NOTES.md): head, hair, hats and every top share one
-    frame; trousers/shoes match the body below the pelvis (|dy| < 0.016) but every top seam is ~0.15 below the
-    body's own seam (spread ~0.01); the PC rig is a uniform scale of that garment frame (tee elbows + jeans knees:
-    residual max 0.021) but needs an anisotropic stretch to fit the body frame. Hence the body, not the garments, is
-    moved. Body skin crossing the waist is hidden under garments."""
+    Codex's correction for the factor-2 decode (research/FRAME-NOTES.md): under it every top seam sat ~0.15 below the body's
+    own seam while trousers/shoes matched, so the body's upper half was moved down to the "garment frame". rp6's per-axis
+    decode removes the offset at the source (avatar_model.DECODES), so the production path never calls this."""
     up = upper_bones()
     P = AM.positions(body_mesh)
     w = body_mesh["weights"].astype(float) / 255.0
@@ -435,16 +436,19 @@ def compose(preset_name, head_res=1024, garment_res=512, colours=None):
     installed bake). An avatar_colours.Colours applies the console's rule instead: head layers R = colour, G = white,
     B = skin shading, and body / hair / garment tint masks with CustomColor1..3 (research/AVATAR-SHADERS.md)."""
     P = PRESETS[preset_name] if isinstance(preset_name, str) else dict(preset_name)
+    legacy = AM.DECODE_NAME == "c253"
+    if legacy and {k for k, v in P.items() if v is not None} - C253_KEYS:
+        raise ValueError("the c253 reproduction path takes the C253 presets only (no face shapes, hats, glasses, hand items, costumes)")
     prov = dict(preset=preset_name if isinstance(preset_name, str) else "custom", items={k: v for k, v in P.items() if k != "frame"},
-                components={}, colours={}, notes=[])
+                components={}, colours={}, notes=[], decode=dict(profile=AM.DECODE_NAME, factors=AM.K.round(6).tolist()))
     parts = []
     body = load_part(P["body"])
     head = load_part(P["head"])
     if any(P.get(k) is not None for k in ("nose", "chin", "ears")):
-        # step 4: face shape overrides, applied as shape changes with each region's constant offset removed (avatar_faceshape:
-        # the stored positions sit 2-5 cm off the stock head per region and no global transform explains it; labelled approximation)
+        # step 4 / rp6: face shape overrides as stored. With the per-axis decode they sit on the stock head (the mean offset per
+        # region is below 4 mm and is recorded per block in the provenance), so the old "shape only" correction is gone.
         import avatar_faceshape as FS
-        head["meshes"], prov["face_shapes"] = FS.apply(head["meshes"], [P.get("nose"), P.get("chin"), P.get("ears")], mode="shape_only")
+        head["meshes"], prov["face_shapes"] = FS.apply(head["meshes"], [P.get("nose"), P.get("chin"), P.get("ears")])
     skin_rgba = body["textures"][0].astype(float) / 255.0
     skin = solid_colour(skin_rgba)
     if skin is None:
@@ -512,38 +516,42 @@ def compose(preset_name, head_res=1024, garment_res=512, colours=None):
         for role, part in roles:
             prov["colours"]["tint"][role] = dict(ACOL.tint_part(part, colours.custom_for(part["index"], role)), item=part["name"])
     body_mesh = body["meshes"][0]
-    # frame correction: measure the preset top against the body, then move the body's upper half (not the garments)
-    top_part = next((p for r, p in roles if r == "shirt"), None)
-    gender = 0 if P["body"] == 0 else 1
-    delta, src = np.array(TOP_OFFSET_FALLBACK[gender]), "category median (no top in preset)"
-    if top_part and top_part["meshes"]:
-        _, arec = align_to_body(top_part["meshes"][0], body_mesh)
-        if arec.get("applied"):
-            delta, src = np.array(arec["delta"]), f"measured {top_part['name']} vs {body['name']} ({arec['seams']} seams, spread {arec['spread']})"
     worn = [P[r] for r in ("shirt", "pants", "shoes", "costume", "gloves") if P.get(r) is not None]
     templated_body, hidden, hrec = apply_hiding_templates(body_mesh, worn)
-    moved_body, brec = body_to_garment_frame(templated_body, delta)
-    prov["frame"] = dict(frame="garment/head frame (uniform PC fit)", body_upper_shift=brec, delta_source=src)
+    if legacy:
+        # c253 reproduction (factor-2 decode): measure the preset top against the body, then move the body's upper half
+        top_part = next((p for r, p in roles if r == "shirt"), None)
+        gender = 0 if P["body"] == 0 else 1
+        delta, src = np.array(TOP_OFFSET_FALLBACK[gender]), "category median (no top in preset)"
+        if top_part and top_part["meshes"]:
+            _, arec = align_to_body(top_part["meshes"][0], body_mesh)
+            if arec.get("applied"):
+                delta, src = np.array(arec["delta"]), f"measured {top_part['name']} vs {body['name']} ({arec['seams']} seams, spread {arec['spread']})"
+        final_body, brec = body_to_garment_frame(templated_body, delta)
+        prov["frame"] = dict(frame="garment/head frame (c253 reproduction: factor-2 decode + body upper-half shift)", body_upper_shift=brec, delta_source=src)
+    else:
+        # rp6: one frame for everything. Every part stays where it is authored; its measured offset against the body is recorded
+        # (head items share no body seams: "too few shared seams") and any measured median offset beyond FRAME_TOLERANCE refuses the bake.
+        final_body = templated_body
+        prov["frame"] = dict(frame="body frame (per-axis decode: every part as authored, nothing shifted)", tolerance=FRAME_TOLERANCE, measured_offsets={})
     for role, part in roles:
         prov["components"][role] = dict(index=part["index"], name=part["name"], samplers=part["samplers"], textures=len(part["textures"]))
         for k, me in enumerate(part["meshes"]):
+            name = role if len(part["meshes"]) == 1 else f"{role}{k}"
             if role == "body":
-                me = moved_body
+                me = final_body
+            elif not legacy:
+                _, arec = align_to_body(me, body_mesh)
+                prov["frame"]["measured_offsets"][name] = arec
+                d = arec.get("delta")      # present whenever enough seams are shared, rigid or not
+                if d is not None and max(abs(x) for x in d) > FRAME_TOLERANCE:
+                    raise ValueError(f"{part['name']} ({name}) sits {d} from the body: another frame? (tolerance {FRAME_TOLERANCE})")
             elif role in ("pants", "shoes"):
                 _, arec = align_to_body(me, body_mesh)  # recorded only: lower-body garments match the body (|dy|<0.016)
                 prov["components"][role].setdefault("measured_offset_vs_body_not_applied", []).append(arec)
-            elif role in HAND_OFFSET_FALLBACK:
-                # hand / wrist items: authored below the tops' frame; move them up into the moved upper body's frame
-                _, arec = align_to_body(me, body_mesh)
-                own = np.array(arec["delta"]) if arec.get("applied") else np.array(HAND_OFFSET_FALLBACK[role])
-                shift = delta - own
-                me = dict(me)
-                me["pos_override"] = AM.positions(part["meshes"][k]) + shift
-                prov["components"][role].setdefault("frame_shift", []).append(dict(measured=arec, own_offset=own.round(4).tolist(),
-                                                                                   shift=shift.round(4).tolist(), source="measured seams" if arec.get("applied") else "category fallback"))
             # surfaces are built by avatar_surface.charts_for_part (UV0 of garments is shared/mirrored, so decals
             # cannot be baked into it); the decoded record travels with the part
-            parts.append(dict(role=role if len(part["meshes"]) == 1 else f"{role}{k}", src=part["index"], mesh=me, uv_pair=0, record=part,
+            parts.append(dict(role=name, src=part["index"], mesh=me, uv_pair=0, record=part,
                               allow_shared_decal=colours is not None))   # step 4: coloured (new) avatars accept the shared-UV0 decal fallback
     untemplated = {c["index"] for c in hrec["without_template"]}
     fallback = [p["mesh"] for p in parts if p["role"].startswith(("shirt", "pants", "shoes")) and p["src"] in untemplated]

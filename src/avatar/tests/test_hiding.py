@@ -90,18 +90,22 @@ def coverage_agreement():
     for top, body_i in ((92, 0), (301, 1)):
         body = AM.decode(decoded(body_i))["meshes"][0]
         t = H.load(H.template_for(top), body)
-        _, arec = AC.align_to_body(AC.load_part(top)["meshes"][0], body)
-        moved, _ = AC.body_to_garment_frame(body, arec["delta"])
-        keep, _ = AC.covered_keep_mask(moved, AC.load_part(top)["meshes"], reach=0.06, reach_inward=0.02)
+        top_meshes = AC.load_part(top)["meshes"]
+        # rp6: the top is authored in the body's frame (per-axis decode), so the body is used as decoded; the measured
+        # seam offset pins that claim (the factor-2 decode gave -0.15 here and needed a body shift)
+        _, arec = AC.align_to_body(top_meshes[0], body)
+        assert arec.get("applied") and abs(arec["delta"][1]) < 0.03, (top, arec)
+        keep, _ = AC.covered_keep_mask(body, top_meshes, reach=0.06, reach_inward=0.02)
         hidden = np.zeros(len(body["triangles"]), bool)
         hidden[t["hidden_triangles"]] = True
-        P = AM.positions(moved)
+        P = AM.positions(body)
         cy = P[body["triangles"]].mean(1)[:, 1]
-        torso = (cy > 0.75) & (cy < 1.35)
+        G = np.concatenate([AM.positions(g) for g in top_meshes])
+        band = (cy > G[:, 1].min()) & (cy < G[:, 1].max())   # the top's own height range (its hem overhangs hips the trousers' template hides)
         a = float((~keep[hidden]).mean())
-        b = float((~keep[~hidden & ~torso]).mean())
+        b = float((~keep[~hidden & ~band]).mean())
         assert a > 0.6 and b < 0.1, (top, a, b)
-        rows.append(f"{AC.NAMES[top]}: {a:.0%} of template-hidden triangles geometrically covered vs {b:.0%} of visible non-torso")
+        rows.append(f"{AC.NAMES[top]}: top seams {arec['delta']} from the body; {a:.0%} of template-hidden triangles geometrically covered vs {b:.0%} of visible triangles above or below the top")
     return "; ".join(rows)
 
 

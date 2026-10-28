@@ -1,5 +1,9 @@
 """Uniform similarity PC_bind = s * X + t from GARMENT-frame joints (supersedes the body-frame diagonal fit).
 
+Historical (c253 decode): the fit of the C253 / rp4 / rp5 bakes (s = 2.1679). It runs under avatar_model profile "c253" and
+writes only the key `uniform_garment_frame` of research/SPACE-FIT.json (the other keys are kept), which the c253 reproduction
+path (tests/test_control_rp4.py) reads. The production fit is tools/fit_space_rp6.py.
+
 Joints: elbows from every top that has the (SC_E, SC_S) seam, knees from every trouser that has the (SC_H, SC_K)
 seam, for the male garments (the PC rig is one skeleton). Rotation is not fitted (both face +Z, +X left).
 Output: research/SPACE-FIT.json key `uniform_garment_frame` (earlier fits preserved under `superseded_*`)."""
@@ -34,6 +38,7 @@ def seams(me, xb):
 
 
 def main():
+    AM.set_decode("c253")   # the garment-frame fit exists only under the factor-2 decode (research/FRAME-NOTES.md)
     xb = bone_map.xbox_bone_names()
     z, f, m, bind, W = bone_map.pc_rig()
     pcn = [n["name"] for n in m["nodes"]]
@@ -61,15 +66,15 @@ def main():
     sol2, *_ = np.linalg.lstsq(A.reshape(len(X), 3, 4)[keep].reshape(-1, 4), Y[keep].reshape(-1), rcond=None)
     s2, t2 = float(sol2[0]), sol2[1:]
     r2 = np.linalg.norm(Y - (s2 * X + t2), axis=1)
-    old = json.loads((MODULE / "research" / "SPACE-FIT.json").read_text())
-    out = dict(uniform_garment_frame=dict(scale=s2, translation=t2.tolist(), joints=int(len(X)), used=int(keep.sum()),
-                                          residual_median=float(np.median(r2[keep])), residual_max_used=float(r2[keep].max()),
-                                          residual_max_all=float(r2.max()), first_pass=dict(scale=s, translation=t.tolist(), residual_median=float(np.median(r)),
-                                                                                             residual_max=float(r.max())),
-                                          garments=sorted({f"{a} {b}" for a, b, _ in lab})),
-               superseded_body_frame=dict(old, note="fits to MaleBody seams; anisotropic because the body's upper half is ~0.155 higher than the garment/head frame (research/FRAME-NOTES.md)"))
-    (MODULE / "research" / "SPACE-FIT.json").write_text(json.dumps(out, indent=1) + "\n")
-    print(json.dumps({k: v for k, v in out["uniform_garment_frame"].items() if k != "garments"}, indent=1), len(out["uniform_garment_frame"]["garments"]))
+    p = MODULE / "research" / "SPACE-FIT.json"
+    d = json.loads(p.read_text()) if p.exists() else {}
+    d["uniform_garment_frame"] = dict(scale=s2, translation=t2.tolist(), joints=int(len(X)), used=int(keep.sum()),
+                                      residual_median=float(np.median(r2[keep])), residual_max_used=float(r2[keep].max()),
+                                      residual_max_all=float(r2.max()), first_pass=dict(scale=s, translation=t.tolist(), residual_median=float(np.median(r)),
+                                                                                         residual_max=float(r.max())),
+                                      garments=sorted({f"{a} {b}" for a, b, _ in lab}))
+    p.write_text(json.dumps(d, indent=1) + "\n")       # the other keys (superseded_body_frame, uniform_rp6) are kept
+    print(json.dumps({k: v for k, v in d["uniform_garment_frame"].items() if k != "garments"}, indent=1), len(d["uniform_garment_frame"]["garments"]))
 
 
 if __name__ == "__main__":

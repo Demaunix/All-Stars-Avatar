@@ -22,7 +22,7 @@ from PIL import Image
 
 M=Path(__file__).resolve().parents[1]
 W=M/'work'
-READER=M.parent/'mii-restoration-001/tools/zif.py'
+READER=M/'tools/zif.py'   # the same reader (hash-pinned) that Codex's mii-restoration-001 module held; that folder is not in this project
 assert hashlib.sha256(READER.read_bytes()).hexdigest()=='c2927450ed91212c21fcf665a732db82f3997f80668bfc071394fab5ff629269'
 out=W/(sys.argv[1] if len(sys.argv)>1 else 'avatar-root-atlas-dds-probe-001')
 assert out.parent==W and not out.exists()

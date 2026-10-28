@@ -2,7 +2,9 @@
 
 For every decoded skinned garment, edges whose endpoints are dominated by two different bones form seams; seams
 that also exist on the body give paired joint estimates. The median delta (garment - body) is reported per
-garment with its spread. Output research/GARMENT-OFFSETS.json. Read-only, offline."""
+garment with its spread. Output research/GARMENT-OFFSETS.json for the active decode profile (rp6: everything within
+~2 cm). The factor-2 decode's result (tops -0.15, gloves -0.20: the artefact that led to the per-axis decode) is kept as
+research/GARMENT-OFFSETS-c253-decode.json. Read-only, offline."""
 import json
 import sys
 from collections import Counter

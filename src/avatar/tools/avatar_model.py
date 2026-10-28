@@ -130,12 +130,40 @@ def _mesh_at(bits, q, nverts_hint=None):
     return mesh
 
 
-def positions(mesh, scale=2.0):
-    """Dequantize: min + q * step * scale (scale=2 established by T-pose symmetry; see research notes).
-    A composed copy may carry `pos_override` (documented per-vertex frame correction, avatar_compose)."""
+R15, R3 = np.sqrt(1.5), np.sqrt(3.0)
+DECODES = {
+    # rp6 (2026-10-27): per-axis dequantisation factors. Evidence (research/xbox-layering-analysis/minfit, notes/m10-phase1.md
+    # step 5): with the factor 2 on every axis, tops sat 15 cm below the body, gloves 20 cm, every nose 5 cm off the head, and
+    # each offset was proportional to the two blocks' `min` difference: dy = (1 - sqrt(1.5)) dmin_y, dz = (1 - 2/sqrt(3)) dmin_z.
+    # With these factors tops / trousers / shoes / costumes / gloves meet the body within 2.2 cm in y (front/back up to 4.5 cm on
+    # two high-heel shoes and a vest), wrist items within 1 cm in y, face shapes sit on the stock head within 4 mm per region
+    # (single blocks up to 7 mm), 54 % of the hiding overrides are exact copies of the body vertex, and the body
+    # fits the PC rig with ONE uniform scale (per-axis check y/x 0.999 instead of 0.82). INFERRED from the data (XAM's own decode is not in the
+    # supplied files); z is the least certain axis. x keeps the factor 2 (T-pose symmetry).
+    "rp6": np.array([2.0, 2.0 / R15, R3]),
+    # Codex's C235..C253 decode (factor 2 on every axis). Kept only to reproduce the installed rp4 / staged rp5 bakes byte for
+    # byte (tests/test_control_rp4.py); it needs avatar_compose's c253 body shift and the garment-frame rig fit.
+    "c253": np.array([2.0, 2.0, 2.0]),
+}
+DECODE_NAME = "rp6"
+K = DECODES[DECODE_NAME]
+
+
+def set_decode(name):
+    """Select the dequantisation profile for every decoder in this module family (rp6 = production, c253 = reproduction)."""
+    global DECODE_NAME, K
+    K = DECODES[name]
+    DECODE_NAME = name
+    return K
+
+
+def positions(mesh, scale=None):
+    """Dequantize: min + q * step * K per axis (K = the active DECODES profile unless `scale` is given).
+    A composed copy may carry `pos_override` (per-vertex positions written by avatar_compose, e.g. hiding overrides)."""
     if "pos_override" in mesh:
         return mesh["pos_override"]
-    return np.asarray(mesh["min"])[None, :] + mesh["quantized"] * mesh["step"] * scale
+    k = K if scale is None else np.asarray(scale, float)
+    return np.asarray(mesh["min"])[None, :] + mesh["quantized"] * mesh["step"] * k
 
 
 def find_meshes(data):

@@ -85,7 +85,7 @@ def decode(data, body_mesh=None):
     if (off % VERTEX_STRIDE).any():
         raise HidingError("override offset not on a vertex boundary")
     out = dict(hidden_triangles=tris, body_index_bytes=ibytes, body_vertex_bytes=vbytes, gender=gender,
-               vertices=off // VERTEX_STRIDE, positions=np.array([mx, my, mz]) + Q * step * 2.0,
+               vertices=off // VERTEX_STRIDE, positions=np.array([mx, my, mz]) + Q * step * AM.K, quantized=Q, min=(mx, my, mz),
                normal_raw=normal_raw, normal=AM.hend3n(normal_raw), weights=weights, bones=bones, color=color)
     if (nv and ((weights.sum(1) != 255).any() or bones.max() >= 71)):
         raise HidingError("override skin out of range")

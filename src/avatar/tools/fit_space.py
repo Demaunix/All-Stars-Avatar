@@ -1,5 +1,8 @@
 """Fit the uniform transform PC_bind = s * Xbox + t from joint positions estimated at skinning seams.
 
+Historical (c253 decode): this was Codex's first fit; it runs under avatar_model profile "c253" and writes only the key
+`superseded_body_frame` of research/SPACE-FIT.json (the other keys are kept). The production fit is tools/fit_space_rp6.py.
+
 For each edge of the decoded body/clothing meshes whose two vertices are dominated by a parent bone and its child
 bone (per the authoritative Xbox->PC bone table), the edge midpoint lies on the seam around the child joint. The seam
 centroid estimates the child joint position in Xbox avatar space. Least squares then gives s and t (no rotation:
@@ -36,6 +39,7 @@ for S, L in (("LF", "Left"), ("RT", "Right")):
 
 
 def main():
+    AM.set_decode("c253")   # the fit this script documents was made with the factor-2 decode (research/FRAME-NOTES.md)
     xb = bone_map.xbox_bone_names()
     mp = bone_map.mapping()
     z, f, m, bind, W = bone_map.pc_rig()
@@ -92,8 +96,12 @@ def main():
                  residual_diagonal=float(res[i])) for i, n in enumerate(names)]
     out = dict(uniform=dict(scale=float(s), translation=t.tolist(), residual_median=float(np.median(res_u)), residual_max=float(res_u.max())),
                diagonal=dict(scale=sd.tolist(), translation=td.tolist(), residual_median=float(np.median(res)), residual_max=float(res.max())),
-               joints=len(X), rows=rows)
-    (MODULE / "research" / "SPACE-FIT.json").write_text(json.dumps(out, indent=1) + "\n")
+               joints=len(X), rows=rows,
+               note="fits to MaleBody seams; anisotropic because the body's upper half is ~0.155 higher than the garment/head frame (research/FRAME-NOTES.md)")
+    p = MODULE / "research" / "SPACE-FIT.json"
+    d = json.loads(p.read_text()) if p.exists() else {}
+    d["superseded_body_frame"] = out          # the other keys (uniform_garment_frame, uniform_rp6) are kept
+    p.write_text(json.dumps(d, indent=1) + "\n")
     print("uniform s", s, "t", t, "median", np.median(res_u), "max", res_u.max())
     print("diagonal s", sd, "t", td, "n", len(X), "median res", np.median(res), "max", res.max())
     for r in sorted(rows, key=lambda r: -r["residual_diagonal"])[:12]:

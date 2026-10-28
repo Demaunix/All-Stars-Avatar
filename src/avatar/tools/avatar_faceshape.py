@@ -7,10 +7,11 @@ carries 12 texcoord halves, so its stride is 28 + 24 = 52, not the body's 40). E
 (both meshes indexed as one buffer: 0..323 mesh 0, 324..647 mesh 1): position, normal, skin, colour; texcoords kept.
 The blocks with zero overrides are the defaults (Small Chin 801, Angled Nose 807, Round Ears 823).
 
-CAUTION (notes/m10-phase1.md): the override positions sit at a constant per-region offset from the stock head (noses about
-(0, -0.021, -0.051), ears (0, -0.024, -0.018)); `apply` can take them as absolute positions (mode "absolute") or shift
-the region back by its mean offset (mode "shape_only", keeping only the shape change). Which one the console does is not
-proven; compare renders with the Xbox editor before relying on either.
+Frame (rp6, 2026-10-27): with the factor-2 decode the override positions sat at a constant per-region offset from the stock head
+(noses about (0, -0.021, -0.051), ears (0, -0.024, -0.018)) and `apply` subtracted that mean ("shape only"). With the per-axis
+decode (avatar_model.DECODES["rp6"]) the offsets vanish (nose (0, -0.001, +0.002), ears (0, -0.002, 0.0005), chins
+(0, -0.002, 0.004); research/xbox-layering-analysis/minfit/verifyA.py), so the overrides are applied as stored and the
+remaining mean offset is only recorded.
 """
 import struct
 import sys
@@ -68,13 +69,14 @@ def decode(data: bytes) -> dict:
     color = AM.bytes4(b.column(st, o, cbits) + cb)
     if (off % HEAD_STRIDE).any():
         raise FaceShapeError("override offset not on a head vertex boundary")
-    return dict(vertices=(off // HEAD_STRIDE).astype(int), positions=np.array([mx, my, mz]) + Q * step * 2.0, normal=AM.hend3n(normal_raw),
-                weights=weights, bones=bones, color=color, index_bytes=ibytes, vertex_bytes=vbytes)
+    return dict(vertices=(off // HEAD_STRIDE).astype(int), positions=np.array([mx, my, mz]) + Q * step * AM.K, quantized=Q, min=(mx, my, mz),
+                normal=AM.hend3n(normal_raw), weights=weights, bones=bones, color=color, index_bytes=ibytes, vertex_bytes=vbytes)
 
 
-def apply(head_meshes: list, indices: list, mode: str = "absolute") -> tuple:
-    """Return copies of the two head meshes with the overrides of `indices` applied, and a record.
-    mode "absolute": positions as stored; "shape_only": minus the region's mean offset against the stock head."""
+def apply(head_meshes: list, indices: list) -> tuple:
+    """Return copies of the two head meshes with the overrides of `indices` applied as stored, and a record (per block: the mean
+    offset of the overridden vertices against the stock head; per-region average below 4 mm with the per-axis decode, single
+    blocks up to 7 mm, e.g. Defined Nose, Large Chin)."""
     names = {c["index"]: c["name"] for c in catalog()}
     counts = [len(m["quantized"]) for m in head_meshes]
     if sum(counts) != 648 or len(head_meshes) != 2:
@@ -95,12 +97,12 @@ def apply(head_meshes: list, indices: list, mode: str = "absolute") -> tuple:
         stock = np.concatenate([AM.positions(m) for m in head_meshes])
         delta = t["positions"] - stock[t["vertices"]]
         mean = delta.mean(0)
-        pos = t["positions"] - (mean if mode == "shape_only" else 0.0)
+        pos = t["positions"]
         for j, v in enumerate(t["vertices"]):
             mi, vi = (0, v) if v < counts[0] else (1, v - counts[0])
             out[mi]["pos_override"][vi] = pos[j]
             out[mi]["normal"][vi] = t["normal"][j]
-        rec.append(dict(index=idx, name=names.get(idx), applied=True, mode=mode, overrides=int(len(t["vertices"])),
+        rec.append(dict(index=idx, name=names.get(idx), applied=True, overrides=int(len(t["vertices"])),
                         mean_offset=[round(float(x), 4) for x in mean], residual_median=round(float(np.median(np.linalg.norm(delta - mean, axis=1))), 4)))
     return out, rec
 

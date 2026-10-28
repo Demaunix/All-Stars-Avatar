@@ -52,9 +52,13 @@ def sha(b):
     return hashlib.sha256(b).hexdigest()
 
 
+SPACE_FIT_KEY = {"rp6": "uniform_rp6", "c253": "uniform_garment_frame"}   # research/SPACE-FIT.json key per decode profile
+
+
 def space_fit():
-    """Uniform garment-frame fit (tools/fit_space_garment.py); returned as per-axis arrays for the shared code path."""
-    d = json.loads((MODULE / "research" / "SPACE-FIT.json").read_text())["uniform_garment_frame"]
+    """Uniform PC-rig fit for the active decode profile (rp6: tools/fit_space_rp6.py, body + garment seams in one frame;
+    c253: tools/fit_space_garment.py, garment-frame seams); returned as per-axis arrays for the shared code path."""
+    d = json.loads((MODULE / "research" / "SPACE-FIT.json").read_text())[SPACE_FIT_KEY[AM.DECODE_NAME]]
     return np.full(3, d["scale"]), np.array(d["translation"])
 
 
